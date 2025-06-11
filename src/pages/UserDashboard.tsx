@@ -2,52 +2,65 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Calendar, Users, User, Clock, LogOut } from 'lucide-react';
+import { Calendar, Users, Clock, LogOut } from 'lucide-react';
+import { format } from 'date-fns';
 
 interface Booking {
   id: string;
-  game: string;
-  date: string;
-  time: string;
+  game_id: string;
+  booking_date: string;
+  time_slot: string;
   status: 'pending' | 'confirmed' | 'canceled' | 'no-show';
   cost?: number;
+  games: {
+    name: string;
+  };
 }
 
 const UserDashboard = () => {
   const { user, logout } = useAuth();
   const [recentBookings, setRecentBookings] = useState<Booking[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Mock recent bookings data
-    setRecentBookings([
-      {
-        id: '1',
-        game: 'Cricket',
-        date: '2024-06-15',
-        time: '10:00 AM',
-        status: 'confirmed',
-        cost: 500
-      },
-      {
-        id: '2',
-        game: 'Carrom',
-        date: '2024-06-14',
-        time: '2:00 PM',
-        status: 'pending'
-      },
-      {
-        id: '3',
-        game: 'Cricket',
-        date: '2024-06-13',
-        time: '6:00 PM',
-        status: 'confirmed',
-        cost: 500
+    if (user) {
+      fetchRecentBookings();
+    }
+  }, [user]);
+
+  const fetchRecentBookings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          game_id,
+          booking_date,
+          time_slot,
+          status,
+          cost,
+          games (name)
+        `)
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false })
+        .limit(3);
+
+      if (error) {
+        console.error('Error fetching bookings:', error);
+        return;
       }
-    ]);
-  }, []);
+
+      setRecentBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -126,7 +139,12 @@ const UserDashboard = () => {
             <CardDescription>Your latest booking activities</CardDescription>
           </CardHeader>
           <CardContent>
-            {recentBookings.length > 0 ? (
+            {isLoading ? (
+              <div className="text-center py-8">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+                <p className="text-gray-500 mt-2">Loading bookings...</p>
+              </div>
+            ) : recentBookings.length > 0 ? (
               <div className="space-y-4">
                 {recentBookings.map((booking) => (
                   <div key={booking.id} className="flex items-center justify-between p-4 border rounded-lg">
@@ -135,8 +153,10 @@ const UserDashboard = () => {
                         <Users className="w-5 h-5 text-blue-600" />
                       </div>
                       <div>
-                        <h3 className="font-medium">{booking.game}</h3>
-                        <p className="text-sm text-gray-500">{booking.date} at {booking.time}</p>
+                        <h3 className="font-medium">{booking.games.name}</h3>
+                        <p className="text-sm text-gray-500">
+                          {format(new Date(booking.booking_date), 'PPP')} at {booking.time_slot}
+                        </p>
                       </div>
                     </div>
                     <div className="flex items-center space-x-4">

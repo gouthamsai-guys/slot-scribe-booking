@@ -2,74 +2,68 @@
 import { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { ArrowLeft, Filter, Users } from 'lucide-react';
+import { format } from 'date-fns';
 
 interface Booking {
   id: string;
-  game: string;
-  date: string;
-  time: string;
+  game_id: string;
+  booking_date: string;
+  time_slot: string;
   status: 'pending' | 'confirmed' | 'canceled' | 'no-show';
   cost?: number;
-  createdAt: string;
+  created_at: string;
+  games: {
+    name: string;
+  };
 }
 
 const BookingHistory = () => {
   const { user, logout } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [statusFilter, setStatusFilter] = useState('all');
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Mock bookings data
-    setBookings([
-      {
-        id: '1',
-        game: 'Cricket',
-        date: '2024-06-15',
-        time: '10:00 AM',
-        status: 'confirmed',
-        cost: 500,
-        createdAt: '2024-06-10'
-      },
-      {
-        id: '2',
-        game: 'Carrom',
-        date: '2024-06-14',
-        time: '2:00 PM',
-        status: 'pending',
-        createdAt: '2024-06-12'
-      },
-      {
-        id: '3',
-        game: 'Cricket',
-        date: '2024-06-13',
-        time: '6:00 PM',
-        status: 'confirmed',
-        cost: 500,
-        createdAt: '2024-06-08'
-      },
-      {
-        id: '4',
-        game: 'Badminton',
-        date: '2024-06-12',
-        time: '4:00 PM',
-        status: 'canceled',
-        createdAt: '2024-06-05'
-      },
-      {
-        id: '5',
-        game: 'Carrom',
-        date: '2024-06-11',
-        time: '1:00 PM',
-        status: 'no-show',
-        createdAt: '2024-06-06'
+    if (user) {
+      fetchBookings();
+    }
+  }, [user]);
+
+  const fetchBookings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          id,
+          game_id,
+          booking_date,
+          time_slot,
+          status,
+          cost,
+          created_at,
+          games (name)
+        `)
+        .eq('user_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching bookings:', error);
+        return;
       }
-    ]);
-  }, []);
+
+      setBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -88,6 +82,17 @@ const BookingHistory = () => {
   const totalSpent = bookings
     .filter(booking => booking.status === 'confirmed' && booking.cost)
     .reduce((sum, booking) => sum + (booking.cost || 0), 0);
+
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="text-gray-500 mt-4">Loading booking history...</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -189,12 +194,12 @@ const BookingHistory = () => {
                         <Users className="w-6 h-6 text-blue-600" />
                       </div>
                       <div>
-                        <h3 className="font-medium">{booking.game}</h3>
+                        <h3 className="font-medium">{booking.games.name}</h3>
                         <p className="text-sm text-gray-500">
-                          {booking.date} at {booking.time}
+                          {format(new Date(booking.booking_date), 'PPP')} at {booking.time_slot}
                         </p>
                         <p className="text-xs text-gray-400">
-                          Booked on {booking.createdAt}
+                          Booked on {format(new Date(booking.created_at), 'PPP')}
                         </p>
                       </div>
                     </div>

@@ -1,100 +1,191 @@
-
 import { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '@/integrations/supabase/client';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from '@/components/ui/dialog';
 import { toast } from '@/hooks/use-toast';
-import { 
-  Users, 
-  Calendar, 
-  Clock, 
-  TrendingUp, 
-  CheckCircle, 
-  XCircle, 
-  AlertCircle,
-  LogOut,
-  Filter
-} from 'lucide-react';
+import { LogOut, Plus, Users, Calendar, Clock, TrendingUp } from 'lucide-react';
+import { format } from 'date-fns';
 
 interface Booking {
   id: string;
-  userId: string;
-  userName: string;
-  game: string;
-  date: string;
-  time: string;
+  user_id: string;
+  game_id: string;
+  booking_date: string;
+  time_slot: string;
   status: 'pending' | 'confirmed' | 'canceled' | 'no-show';
   cost?: number;
-  createdAt: string;
+  notes?: string;
+  created_at: string;
+  profiles: { name: string; email: string };
+  games: { name: string };
+}
+
+interface Game {
+  id: string;
+  name: string;
+  description: string;
+  is_active: boolean;
 }
 
 const AdminDashboard = () => {
   const { user, logout } = useAuth();
   const [bookings, setBookings] = useState<Booking[]>([]);
+  const [games, setGames] = useState<Game[]>([]);
+  const [newGame, setNewGame] = useState({ name: '', description: '' });
   const [statusFilter, setStatusFilter] = useState('all');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isAddingGame, setIsAddingGame] = useState(false);
 
   useEffect(() => {
-    // Mock bookings data
-    setBookings([
-      {
-        id: '1',
-        userId: '2',
-        userName: 'John Doe',
-        game: 'Cricket',
-        date: '2024-06-15',
-        time: '10:00 AM',
-        status: 'pending',
-        createdAt: '2024-06-10'
-      },
-      {
-        id: '2',
-        userId: '3',
-        userName: 'Jane Smith',
-        game: 'Carrom',
-        date: '2024-06-14',
-        time: '2:00 PM',
-        status: 'confirmed',
-        cost: 300,
-        createdAt: '2024-06-12'
-      },
-      {
-        id: '3',
-        userId: '2',
-        userName: 'John Doe',
-        game: 'Cricket',
-        date: '2024-06-13',
-        time: '6:00 PM',
-        status: 'confirmed',
-        cost: 500,
-        createdAt: '2024-06-08'
-      },
-      {
-        id: '4',
-        userId: '4',
-        userName: 'Mike Johnson',
-        game: 'Badminton',
-        date: '2024-06-12',
-        time: '4:00 PM',
-        status: 'pending',
-        createdAt: '2024-06-11'
-      }
-    ]);
+    fetchBookings();
+    fetchGames();
   }, []);
 
-  const updateBookingStatus = (bookingId: string, newStatus: string, cost?: number) => {
-    setBookings(prev => prev.map(booking => 
-      booking.id === bookingId 
-        ? { ...booking, status: newStatus as any, cost: cost || booking.cost }
-        : booking
-    ));
-    
-    toast({
-      title: "Booking updated",
-      description: `Booking has been ${newStatus}`,
-    });
+  const fetchBookings = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('bookings')
+        .select(`
+          *,
+          profiles (name, email),
+          games (name)
+        `)
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.error('Error fetching bookings:', error);
+        return;
+      }
+
+      setBookings(data || []);
+    } catch (error) {
+      console.error('Error fetching bookings:', error);
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const fetchGames = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('games')
+        .select('*')
+        .order('name');
+
+      if (error) {
+        console.error('Error fetching games:', error);
+        return;
+      }
+
+      setGames(data || []);
+    } catch (error) {
+      console.error('Error fetching games:', error);
+    }
+  };
+
+  const updateBookingStatus = async (bookingId: string, status: string, cost?: number) => {
+    try {
+      const updateData: any = { status };
+      if (cost !== undefined) {
+        updateData.cost = cost;
+      }
+
+      const { error } = await supabase
+        .from('bookings')
+        .update(updateData)
+        .eq('id', bookingId);
+
+      if (error) {
+        console.error('Error updating booking:', error);
+        toast({
+          title: "Update failed",
+          description: "Failed to update booking status",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      await fetchBookings();
+      toast({
+        title: "Booking updated",
+        description: `Status changed to ${status}`,
+      });
+    } catch (error) {
+      console.error('Error updating booking:', error);
+    }
+  };
+
+  const addGame = async () => {
+    if (!newGame.name.trim()) {
+      toast({
+        title: "Invalid input",
+        description: "Game name is required",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsAddingGame(true);
+    try {
+      const { error } = await supabase
+        .from('games')
+        .insert([{
+          name: newGame.name.trim(),
+          description: newGame.description.trim() || null,
+          is_active: true
+        }]);
+
+      if (error) {
+        console.error('Error adding game:', error);
+        toast({
+          title: "Failed to add game",
+          description: "Please try again",
+          variant: "destructive",
+        });
+        return;
+      }
+
+      setNewGame({ name: '', description: '' });
+      await fetchGames();
+      toast({
+        title: "Game added",
+        description: "New game has been added successfully",
+      });
+    } catch (error) {
+      console.error('Error adding game:', error);
+    } finally {
+      setIsAddingGame(false);
+    }
+  };
+
+  const toggleGameStatus = async (gameId: string, isActive: boolean) => {
+    try {
+      const { error } = await supabase
+        .from('games')
+        .update({ is_active: !isActive })
+        .eq('id', gameId);
+
+      if (error) {
+        console.error('Error toggling game status:', error);
+        return;
+      }
+
+      await fetchGames();
+      toast({
+        title: "Game updated",
+        description: `Game ${!isActive ? 'activated' : 'deactivated'}`,
+      });
+    } catch (error) {
+      console.error('Error toggling game status:', error);
+    }
   };
 
   const getStatusColor = (status: string) => {
@@ -120,6 +211,17 @@ const AdminDashboard = () => {
       .reduce((sum, b) => sum + (b.cost || 0), 0)
   };
 
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
+          <p className="text-gray-500 mt-4">Loading admin dashboard...</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       {/* Header */}
@@ -144,191 +246,246 @@ const AdminDashboard = () => {
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-gray-900 mb-2">Admin Dashboard</h1>
-          <p className="text-gray-600">Manage bookings, slots, and view analytics</p>
+          <p className="text-gray-600">Manage bookings, games, and view analytics</p>
         </div>
 
-        <Tabs defaultValue="bookings" className="space-y-6">
-          <TabsList className="grid w-full lg:w-96 grid-cols-3">
-            <TabsTrigger value="bookings">Bookings</TabsTrigger>
-            <TabsTrigger value="slots">Slots</TabsTrigger>
-            <TabsTrigger value="analytics">Analytics</TabsTrigger>
-          </TabsList>
+        {/* Stats Cards */}
+        <div className="grid md:grid-cols-4 gap-6 mb-8">
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center space-x-2">
+                <Calendar className="w-5 h-5 text-blue-600" />
+                <div>
+                  <div className="text-2xl font-bold">{stats.totalBookings}</div>
+                  <p className="text-sm text-gray-600">Total Bookings</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center space-x-2">
+                <Clock className="w-5 h-5 text-yellow-600" />
+                <div>
+                  <div className="text-2xl font-bold text-yellow-600">{stats.pendingBookings}</div>
+                  <p className="text-sm text-gray-600">Pending Approval</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center space-x-2">
+                <Users className="w-5 h-5 text-green-600" />
+                <div>
+                  <div className="text-2xl font-bold text-green-600">{stats.confirmedBookings}</div>
+                  <p className="text-sm text-gray-600">Confirmed</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="pt-6">
+              <div className="flex items-center space-x-2">
+                <TrendingUp className="w-5 h-5 text-purple-600" />
+                <div>
+                  <div className="text-2xl font-bold text-purple-600">₹{stats.totalRevenue}</div>
+                  <p className="text-sm text-gray-600">Total Revenue</p>
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
 
-          {/* Overview Stats */}
-          <div className="grid md:grid-cols-4 gap-6">
+        <div className="grid lg:grid-cols-3 gap-8">
+          {/* Bookings Management */}
+          <div className="lg:col-span-2">
             <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-2xl font-bold">{stats.totalBookings}</div>
-                    <p className="text-sm text-gray-600">Total Bookings</p>
-                  </div>
-                  <Calendar className="w-8 h-8 text-blue-600" />
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <div>
+                  <CardTitle>Booking Management</CardTitle>
+                  <CardDescription>Review and manage all booking requests</CardDescription>
                 </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-2xl font-bold text-yellow-600">{stats.pendingBookings}</div>
-                    <p className="text-sm text-gray-600">Pending</p>
-                  </div>
-                  <Clock className="w-8 h-8 text-yellow-600" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-2xl font-bold text-green-600">{stats.confirmedBookings}</div>
-                    <p className="text-sm text-gray-600">Confirmed</p>
-                  </div>
-                  <CheckCircle className="w-8 h-8 text-green-600" />
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div>
-                    <div className="text-2xl font-bold">₹{stats.totalRevenue}</div>
-                    <p className="text-sm text-gray-600">Revenue</p>
-                  </div>
-                  <TrendingUp className="w-8 h-8 text-green-600" />
-                </div>
+                <Select value={statusFilter} onValueChange={setStatusFilter}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue placeholder="Filter by status" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Status</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                    <SelectItem value="confirmed">Confirmed</SelectItem>
+                    <SelectItem value="canceled">Canceled</SelectItem>
+                    <SelectItem value="no-show">No Show</SelectItem>
+                  </SelectContent>
+                </Select>
+              </CardHeader>
+              <CardContent>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>User</TableHead>
+                      <TableHead>Game</TableHead>
+                      <TableHead>Date & Time</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead>Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {filteredBookings.map((booking) => (
+                      <TableRow key={booking.id}>
+                        <TableCell>
+                          <div>
+                            <p className="font-medium">{booking.profiles.name}</p>
+                            <p className="text-sm text-gray-500">{booking.profiles.email}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>{booking.games.name}</TableCell>
+                        <TableCell>
+                          <div>
+                            <p>{format(new Date(booking.booking_date), 'PPP')}</p>
+                            <p className="text-sm text-gray-500">{booking.time_slot}</p>
+                          </div>
+                        </TableCell>
+                        <TableCell>
+                          <Badge className={getStatusColor(booking.status)}>
+                            {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex space-x-2">
+                            {booking.status === 'pending' && (
+                              <>
+                                <Dialog>
+                                  <DialogTrigger asChild>
+                                    <Button size="sm" variant="outline">Confirm</Button>
+                                  </DialogTrigger>
+                                  <DialogContent>
+                                    <DialogHeader>
+                                      <DialogTitle>Confirm Booking</DialogTitle>
+                                      <DialogDescription>
+                                        Set the cost and confirm this booking
+                                      </DialogDescription>
+                                    </DialogHeader>
+                                    <div className="space-y-4">
+                                      <div>
+                                        <Label htmlFor="cost">Cost (₹)</Label>
+                                        <Input
+                                          id="cost"
+                                          type="number"
+                                          placeholder="Enter cost"
+                                          onKeyDown={(e) => {
+                                            if (e.key === 'Enter') {
+                                              const cost = (e.target as HTMLInputElement).value;
+                                              updateBookingStatus(booking.id, 'confirmed', parseFloat(cost) || 0);
+                                            }
+                                          }}
+                                        />
+                                      </div>
+                                      <Button
+                                        onClick={() => {
+                                          const costInput = document.getElementById('cost') as HTMLInputElement;
+                                          const cost = parseFloat(costInput.value) || 0;
+                                          updateBookingStatus(booking.id, 'confirmed', cost);
+                                        }}
+                                      >
+                                        Confirm Booking
+                                      </Button>
+                                    </div>
+                                  </DialogContent>
+                                </Dialog>
+                                <Button
+                                  size="sm"
+                                  variant="destructive"
+                                  onClick={() => updateBookingStatus(booking.id, 'canceled')}
+                                >
+                                  Reject
+                                </Button>
+                              </>
+                            )}
+                            {booking.status === 'confirmed' && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => updateBookingStatus(booking.id, 'no-show')}
+                              >
+                                Mark No Show
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </CardContent>
             </Card>
           </div>
 
-          <TabsContent value="bookings" className="space-y-6">
-            {/* Filter */}
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center space-x-4">
-                  <Filter className="w-5 h-5 text-gray-500" />
-                  <Select value={statusFilter} onValueChange={setStatusFilter}>
-                    <SelectTrigger className="w-48">
-                      <SelectValue placeholder="Filter by status" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All Status</SelectItem>
-                      <SelectItem value="pending">Pending</SelectItem>
-                      <SelectItem value="confirmed">Confirmed</SelectItem>
-                      <SelectItem value="canceled">Canceled</SelectItem>
-                      <SelectItem value="no-show">No Show</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </CardContent>
-            </Card>
-
-            {/* Bookings Management */}
+          {/* Games Management */}
+          <div>
             <Card>
               <CardHeader>
-                <CardTitle>Booking Requests</CardTitle>
-                <CardDescription>Manage all booking requests and confirmations</CardDescription>
+                <CardTitle>Games Management</CardTitle>
+                <CardDescription>Add and manage available games</CardDescription>
               </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  {filteredBookings.map((booking) => (
-                    <div key={booking.id} className="p-4 border rounded-lg">
-                      <div className="flex items-center justify-between mb-4">
-                        <div className="flex items-center space-x-4">
-                          <div className="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center">
-                            <Users className="w-5 h-5 text-blue-600" />
-                          </div>
-                          <div>
-                            <h3 className="font-medium">{booking.userName}</h3>
-                            <p className="text-sm text-gray-500">
-                              {booking.game} - {booking.date} at {booking.time}
-                            </p>
-                            <p className="text-xs text-gray-400">
-                              Requested on {booking.createdAt}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-center space-x-4">
-                          {booking.cost && (
-                            <span className="text-sm font-medium">₹{booking.cost}</span>
-                          )}
-                          <Badge className={getStatusColor(booking.status)}>
-                            {booking.status.charAt(0).toUpperCase() + booking.status.slice(1)}
-                          </Badge>
-                        </div>
+              <CardContent className="space-y-4">
+                {/* Add New Game */}
+                <div className="space-y-3 p-4 border rounded-lg">
+                  <h4 className="font-medium flex items-center">
+                    <Plus className="w-4 h-4 mr-2" />
+                    Add New Game
+                  </h4>
+                  <div>
+                    <Label htmlFor="game-name">Name</Label>
+                    <Input
+                      id="game-name"
+                      placeholder="Game name"
+                      value={newGame.name}
+                      onChange={(e) => setNewGame({...newGame, name: e.target.value})}
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="game-description">Description</Label>
+                    <Textarea
+                      id="game-description"
+                      placeholder="Game description"
+                      value={newGame.description}
+                      onChange={(e) => setNewGame({...newGame, description: e.target.value})}
+                    />
+                  </div>
+                  <Button onClick={addGame} disabled={isAddingGame} className="w-full">
+                    {isAddingGame ? 'Adding...' : 'Add Game'}
+                  </Button>
+                </div>
+
+                {/* Existing Games */}
+                <div className="space-y-3">
+                  <h4 className="font-medium">Existing Games</h4>
+                  {games.map((game) => (
+                    <div key={game.id} className="flex items-center justify-between p-3 border rounded">
+                      <div>
+                        <p className="font-medium">{game.name}</p>
+                        <p className="text-sm text-gray-500">{game.description}</p>
                       </div>
-                      
-                      {booking.status === 'pending' && (
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            size="sm"
-                            onClick={() => updateBookingStatus(booking.id, 'confirmed', 500)}
-                            className="bg-green-600 hover:bg-green-700"
-                          >
-                            <CheckCircle className="w-4 h-4 mr-1" />
-                            Confirm (₹500)
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="destructive"
-                            onClick={() => updateBookingStatus(booking.id, 'canceled')}
-                          >
-                            <XCircle className="w-4 h-4 mr-1" />
-                            Reject
-                          </Button>
-                        </div>
-                      )}
-                      
-                      {booking.status === 'confirmed' && (
-                        <div className="flex items-center space-x-2">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateBookingStatus(booking.id, 'no-show')}
-                          >
-                            <AlertCircle className="w-4 h-4 mr-1" />
-                            Mark No-Show
-                          </Button>
-                        </div>
-                      )}
+                      <div className="flex items-center space-x-2">
+                        <Badge variant={game.is_active ? "default" : "secondary"}>
+                          {game.is_active ? 'Active' : 'Inactive'}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => toggleGameStatus(game.id, game.is_active)}
+                        >
+                          {game.is_active ? 'Deactivate' : 'Activate'}
+                        </Button>
+                      </div>
                     </div>
                   ))}
                 </div>
               </CardContent>
             </Card>
-          </TabsContent>
-
-          <TabsContent value="slots" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Slot Management</CardTitle>
-                <CardDescription>View and manage time slot availability</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <Clock className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">Slot management feature coming soon</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-
-          <TabsContent value="analytics" className="space-y-6">
-            <Card>
-              <CardHeader>
-                <CardTitle>Analytics Dashboard</CardTitle>
-                <CardDescription>View performance metrics and insights</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="text-center py-8">
-                  <TrendingUp className="w-12 h-12 text-gray-400 mx-auto mb-4" />
-                  <p className="text-gray-500">Analytics dashboard coming soon</p>
-                </div>
-              </CardContent>
-            </Card>
-          </TabsContent>
-        </Tabs>
+          </div>
+        </div>
       </main>
     </div>
   );
