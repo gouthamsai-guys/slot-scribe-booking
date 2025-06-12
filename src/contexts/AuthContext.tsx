@@ -57,6 +57,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchUserProfile = async (authUser: User) => {
     try {
+      // First, set a basic user object from auth data as a fallback
+      const basicUser = {
+        id: authUser.id,
+        email: authUser.email || '',
+        name: authUser.user_metadata?.name || 'User',
+        role: 'user' // Default role
+      };
+
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
@@ -65,6 +73,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) {
         console.error('Error fetching profile:', error);
+        // Try to create a profile if it doesn't exist
+        if (error.code === 'PGRST116') { // Record not found error
+          const { data: userData } = await supabase.auth.getUser();
+          if (userData?.user) {
+            const { data: newProfile, error: createError } = await supabase
+              .from('profiles')
+              .insert([
+                {
+                  id: authUser.id,
+                  email: authUser.email || '',
+                  name: authUser.user_metadata?.name || 'User',
+                  role: 'user' // Default role
+                }
+              ])
+              .select()
+              .single();
+
+            if (createError) {
+              console.error('Error creating profile:', createError);
+              // Use the basic user object as fallback
+              setUser(basicUser);
+              setIsLoading(false);
+              return;
+            }
+
+            if (newProfile) {
+              setUser({
+                id: newProfile.id,
+                email: newProfile.email,
+                name: newProfile.name,
+                role: newProfile.role
+              });
+              setIsLoading(false);
+              return;
+            }
+          }
+        }
+        // Even if there was an error, we should still set user to the basic user object
+        setUser(basicUser);
         setIsLoading(false);
         return;
       }
@@ -76,9 +123,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           name: profile.name,
           role: profile.role
         });
+      } else {
+        // If no profile was found but no error occurred, use the basic user object
+        setUser(basicUser);
       }
     } catch (error) {
       console.error('Error in fetchUserProfile:', error);
+      // Even if there was an error, we should still set user to a basic user object
+      setUser({
+        id: authUser.id,
+        email: authUser.email || '',
+        name: authUser.user_metadata?.name || 'User',
+        role: 'user' // Default role
+      });
     } finally {
       setIsLoading(false);
     }
@@ -99,13 +156,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data.user) {
-        await fetchUserProfile(data.user);
-        return true;
+        try {
+          await fetchUserProfile(data.user);
+          return true;
+        } catch (profileError) {
+          console.error('Profile fetch error:', profileError);
+          // Ensure we set isLoading to false even if profile fetch fails
+          setIsLoading(false);
+          return false;
+        }
       }
     } catch (error) {
       console.error('Login error:', error);
     }
     
+    // Ensure isLoading is always set to false at the end
     setIsLoading(false);
     return false;
   };
@@ -130,7 +195,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data.user) {
-        // Profile will be created automatically by the trigger
+        // Create profile explicitly instead of relying on trigger
+        const { error: profileError } = await supabase
+          .from('profiles')
+          .insert([
+            {
+              id: data.user.id,
+              email: email,
+              name: name,
+              role: 'user' // Default role for new users
+            }
+          ]);
+
+        if (profileError) {
+          console.error('Error creating profile:', profileError);
+          // Continue anyway as the trigger might handle it
+        }
+        
+        // Set the user state immediately after registration
+        setUser({
+          id: data.user.id,
+          email: email,
+          name: name,
+          role: 'user'
+        });
+        
+        setIsLoading(false);
         return true;
       }
     } catch (error) {

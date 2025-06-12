@@ -1,5 +1,5 @@
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
 import { Button } from '@/components/ui/button';
@@ -11,25 +11,63 @@ import { toast } from '@/hooks/use-toast';
 import { User, Lock, Mail } from 'lucide-react';
 
 const Login = () => {
-  const { login, register, isLoading } = useAuth();
+  const { login, register, isLoading, user } = useAuth();
   const navigate = useNavigate();
   const [loginData, setLoginData] = useState({ email: '', password: '' });
   const [registerData, setRegisterData] = useState({ name: '', email: '', password: '' });
+  const [loginAttempted, setLoginAttempted] = useState(false);
+
+  // Redirect if user is already logged in
+  useEffect(() => {
+    if (user) {
+      if (user.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
+    }
+  }, [user, navigate]);
+
+  // Monitor loading state changes after login attempt
+  useEffect(() => {
+    if (loginAttempted && !isLoading && user) {
+      // Login completed successfully
+      if (user.role === 'admin') {
+        navigate('/admin');
+      } else {
+        navigate('/dashboard');
+      }
+      setLoginAttempted(false);
+    }
+  }, [isLoading, user, loginAttempted, navigate]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const success = await login(loginData.email, loginData.password);
-    
-    if (success) {
-      toast({
-        title: "Login successful!",
-        description: "Welcome back to SportClub",
-      });
-      navigate('/dashboard');
-    } else {
+    setLoginAttempted(true);
+    try {
+      // Clear any previous errors
+      const success = await login(loginData.email, loginData.password);
+      
+      if (success) {
+        toast({
+          title: "Login successful!",
+          description: "Welcome back to SportClub",
+        });
+        // Navigation will happen via the useEffect hooks
+      } else {
+        setLoginAttempted(false);
+        toast({
+          title: "Login failed",
+          description: "Please check your credentials and try again",
+          variant: "destructive",
+        });
+      }
+    } catch (error) {
+      setLoginAttempted(false);
+      console.error('Login error:', error);
       toast({
         title: "Login failed",
-        description: "Please check your credentials and try again",
+        description: "An unexpected error occurred",
         variant: "destructive",
       });
     }
