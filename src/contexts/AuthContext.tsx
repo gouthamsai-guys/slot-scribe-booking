@@ -33,21 +33,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
-    // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserProfile(session.user);
-      } else {
-        setIsLoading(false);
-      }
-    });
-
-    // Listen for auth changes
+    // Set up auth state listener first
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state changed:', event, session?.user?.id);
+      
       if (session?.user) {
         await fetchUserProfile(session.user);
       } else {
         setUser(null);
+        setIsLoading(false);
+      }
+    });
+
+    // Then get initial session
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      console.log('Initial session:', session?.user?.id);
+      if (session?.user) {
+        fetchUserProfile(session.user);
+      } else {
         setIsLoading(false);
       }
     });
@@ -57,6 +60,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const fetchUserProfile = async (authUser: User) => {
     try {
+      console.log('Fetching profile for user:', authUser.id);
+      
       const { data: profile, error } = await supabase
         .from('profiles')
         .select('*')
@@ -65,11 +70,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       if (error) {
         console.error('Error fetching profile:', error);
+        // If profile doesn't exist, it might be created by the trigger, wait a bit and retry
+        if (error.code === 'PGRST116') {
+          console.log('Profile not found, waiting for trigger to create it...');
+          setTimeout(() => fetchUserProfile(authUser), 1000);
+          return;
+        }
         setIsLoading(false);
         return;
       }
 
       if (profile) {
+        console.log('Profile fetched successfully:', profile);
         setUser({
           id: profile.id,
           email: profile.email,
@@ -87,6 +99,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string): Promise<boolean> => {
     setIsLoading(true);
     try {
+      console.log('Attempting login for:', email);
+      
       const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password
@@ -99,7 +113,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data.user) {
-        await fetchUserProfile(data.user);
+        console.log('Login successful for user:', data.user.id);
+        // fetchUserProfile will be called by the auth state change listener
         return true;
       }
     } catch (error) {
@@ -113,13 +128,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const register = async (email: string, password: string, name: string): Promise<boolean> => {
     setIsLoading(true);
     try {
+      console.log('Attempting registration for:', email);
+      
       const { data, error } = await supabase.auth.signUp({
         email,
         password,
         options: {
           data: {
             name: name
-          }
+          },
+          emailRedirectTo: `${window.location.origin}/`
         }
       });
 
@@ -130,7 +148,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
 
       if (data.user) {
-        // Profile will be created automatically by the trigger
+        console.log('Registration successful for user:', data.user.id);
+        // The profile will be created by the trigger
         return true;
       }
     } catch (error) {
@@ -142,6 +161,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    console.log('Logging out user');
     await supabase.auth.signOut();
     setUser(null);
   };
